@@ -1,0 +1,222 @@
+#+title: Week 15 Ns
+
+* Due to my last file being wiped form some sort of mistake, I'm going be breezing though till the point of my last entry.
+I'll try to come back later to fill out such sections if I'm to have time later this week.
+** Importing packages & data; exploring & splitting; and one-hot encoding for independent categorication.
+
+#+begin_src python :results output :session week-15  
+import numpy as np 
+import pandas as pd 
+import matplotlib.pyplot as plt
+import cv2
+import tensorflow as tf
+from PIL import Image
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from tensorflow.keras.utils import to_categorical                                
+from tensorflow.keras.models import Sequential, load_model                       
+from tensorflow.keras.layers import Conv2D, MaxPool2D, Dense, Flatten, Dropout   
+
+data = []
+labels = []
+current_path = os.getcwd()
+train_path = os.path.join(current_path, 'train')
+
+# Get the actual class folders that exist
+class_folders = [f for f in os.listdir(train_path) if os.path.isdir(os.path.join(train_path, f))]
+class_folders.sort(key=int)  # Sort numerically
+
+for class_num in class_folders:
+    path = os.path.join(train_path, class_num)
+    images = os.listdir(path)
+    print(f"Loading class {class_num}: {len(images)} images")
+    
+    for a in images:
+        try:
+            image = Image.open(os.path.join(path, a))
+            image = image.resize((30,30))
+            image = np.array(image)
+            data.append(image)
+            labels.append(int(class_num))
+        except Exception as e:
+            print(f"Error loading image {a}: {e}")
+            
+data = np.array(data)
+labels = np.array(labels)
+print(data.shape, labels.shape)
+
+# Split into train and validation
+X_train, X_val, y_train, y_val = train_test_split(
+    data, labels, test_size=0.20, random_state=42
+)
+
+# Creating the test set
+# Creating the test set
+base_dir = "/home/nate/NextCloud/Roam/Classes/Intro_to_ML/assignmnets/week_15/"
+csv_path = os.path.join(base_dir, "Test.csv")
+
+y_test_df = pd.read_csv(csv_path)
+y_test = y_test_df["ClassId"].values
+imgs = y_test_df["Path"].values # This contains values like "Test/00000.png"
+
+data = []
+for img_relative_path in imgs: # Renamed 'img' to be more descriptive
+    
+    # *** THIS IS THE CRITICAL FIX: Construct the full path ***
+    img_full_path = os.path.join(base_dir, img_relative_path)
+
+    try:
+        # Use the newly constructed full path
+        image = Image.open(img_full_path) 
+        image = image.resize((30,30))
+        data.append(np.array(image))
+    except Exception as e:
+        # Print the problematic full path for better debugging
+        print(f"Error loading {img_full_path}: {e}")
+        
+X_test = np.array(data)
+
+# Normalize the data
+X_train = X_train / 255.0
+X_val = X_val / 255.0
+X_test = X_test / 255.0
+
+# Get number of unique classes
+#num_classes = len(np.unique(labels))
+num_classes = 43
+
+# Convert labels to categorical
+y_train = to_categorical(y_train, num_classes=num_classes)
+y_val = to_categorical(y_val, num_classes=num_classes)
+y_test = to_categorical(y_test, num_classes=num_classes)
+
+# Print shapes
+print(f"\nX_train: {X_train.shape}, X_val: {X_val.shape}, X_test: {X_test.shape}")
+print(f"y_train: {y_train.shape}, y_val: {y_val.shape}, y_test: {y_test.shape}")
+#+end_src
+
+#+RESULTS:
+
+Just to make a note here as I remember I didn't yet get to implementing One-hot-encoding, I had used the Keras method for implmenting this encoding method and had used such a method on the 'labels' array I had created this eailer. This was done to ensure that labels, represented as numerical values, can be caterogically assigned wihtout having any issue of supposed ranking by the model. 
+
+I had to re-write the way in which the folder for the images would be searched due to the as the orginal would assume and search fot a object ( here a dir ) to be termed zero.
+
+Later on I had to re-write this again so as to properly pre-load the alternative dataset for the test sets used against the validated model.
+** Modeling.
+What follows next is the creation of the nerual network by creating a sequential network of three convolution layers along with augmentations to the layers by MaxPool2D and Dropout; towards the end, flatting will take place so as the produce a two dimensional output for proper classification.
+
+
+#+begin_src python :results output :session week-15  
+model = Sequential()
+
+model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(128, 128, 3)))
+model.add(MaxPool2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Conv2D(64, (3, 3), activation='relu'))
+model.add(MaxPool2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Conv2D(128, (3, 3), activation='relu'))
+model.add(MaxPool2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Flatten())
+model.add(Dense(128, activation='relu'))
+model.add(Dense(1, activation='sigmoid'))
+#+end_src
+
+So with the first layer created, it becomes the question If I simply add three more of that type or if there is a change due to the input convolution layer only need for the input images. Looking into it, I find that the only thing that needs to be changed is with repsect to the convolution within the first layer where the input_shape is removed as the input to the next layer isn't in the form of images (that'd be created later)
+
+Another thing I'd like to note here is the doubling factor I had used for the amount of filters I'd like the model to use for increasing the depth of features to learn from.
+
+What is dense here and why does it seem to have a simler parameters as Conv2D? Should the number of whatever it is be set to a higher amount? Looking into this as well, the Dense layer is..well it's that: it's a dense network of neurons, but it does service a specific purpose here. Each neuron in this layer is connected to the previous layer, where the weights in the dense network is gotten from the weighted sum of all inputs from the previous layer, which after this such a sum is passed to an activation function like relu or sigmoid here. The difference in activation functions actually help to understand the purpose behind each dense network; the former is the dense network for extracting global patterns of liner combinations of patterns that he model has learned where as the latter is for classifying such extracted features as this or that.   
+
+*** Compiling the model and Running the Model.
+This will not only crete the model but also pass various parameteres to the function in order for the model to adhere to.
+
+#+begin_src python :results output :session week-15  
+
+model.compile(
+    optimizer = Adam(learning_rate=0.0001)
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model.fit(X_val, y_val, batch_size, epochs=50, validation_date=(X_val, y_val), callbacks=callbacks)
+#+end_src
+
+
+Due to low compute I had chosen Adam for the optimizer; I also choose to use EarlyStopping via callback to have some on-the-fly vaildition to find where the sweet spot is for number of epochs.
+
+**** Validation-trained Accuracy.
+#+begin_src python :results output :session week-15  
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+# Plot accuracy
+axes[0].plot(history.history['accuracy'], label='Training Accuracy')
+axes[0].plot(history.history['val_accuracy'], label='Validation Accuracy')
+axes[0].set_title('Model Accuracy Over Epochs')
+axes[0].set_xlabel('Epoch')
+axes[0].set_ylabel('Accuracy')
+axes[0].legend()
+axes[0].grid(True)
+
+# Plot loss
+axes[1].plot(history.history['loss'], label='Training Loss')
+axes[1].plot(history.history['val_loss'], label='Validation Loss')
+axes[1].set_title('Model Loss Over Epochs')
+axes[1].set_xlabel('Epoch')
+axes[1].set_ylabel('Loss')
+axes[1].legend()
+axes[1].grid(True)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+Why this style of creation?
+
+**** Evaluting with the test dataset for accuracy.
+Now evaluating the model for it's loss and accuracy on the test set
+
+#+begin_src python :results output :session week-15  
+test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=1)
+print(f"\n{'='*50}")
+print(f"FINAL TEST SET RESULTS:")
+print(f"Test Accuracy: {test_accuracy*100:.2f}%")
+print(f"Test Loss: {test_loss:.4f}")
+print(f"{'='*50}")
+
+sklearn.metrics import classification_report, confusion_matrix
+import seaborn as sns
+#+end_src
+
+
+Why the confusion matrix(?)
+
+**** Getting predictions
+
+#+begin_src python :results output :session week-15 
+# Get predictions
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+y_test_classes = np.argmax(y_test, axis=1)  # Convert one-hot back to class numbers
+
+# Print classification report
+print("\nClassification Report:")
+print(classification_report(y_test_classes, y_pred_classes))
+
+# Plot confusion matrix (simplified for readability)
+cm = confusion_matrix(y_test_classes, y_pred_classes)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=False, cmap='Blues', fmt='d')
+plt.title('Confusion Matrix - Test Set')
+plt.xlabel('Predicted Class')
+plt.ylabel('True Class')
+plt.show()
+#+end_src
+
+
+** Deployment and Review 

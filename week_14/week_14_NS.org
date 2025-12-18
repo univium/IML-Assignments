@@ -1,0 +1,278 @@
+#+title: Week 14 NS
+#+PROPERTY: header-args:python :session: week-14
+
+
+* For this one it seems it wants me to fill out some of the sections with my own code.
+So basically I'll be following along.
+
+* Problem Scoping
+The overall goal is to create a recomendation model for user's and their books for doing so is to increase retention and by viture create stable, reoccuring income. This would implie that the 'problem' to solve would be within the custmors for they are spending more time searching rather then engaging. This model then has within it the hope that this manual searching process can totaly or almost elimenet that segment of the use experince: the question is how good can I make it.
+
+** Data & the model to be used.
+In this case, data is given; but if it weren't, then I would be looking towards sources like Kaggle or within the organization for it. The model though is wtihout, so naturally looking into Surp!se ( a package I'll be using later ) for some model insprio, I find that most of these algorthyms for recomendation are clustering-like, so SVM or KNN. 
+
+* Importing, loading, and exploring.
+
+#+begin_src python :results output :session week-14 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from plotly.offline import init_notebook_mode
+init_notebook_mode(connected=True)
+
+df_b = pd.read_csv("/home/nate/NextCloud/Roam/Classes/Intro_to_ML/assignmnets/week_14/Books.csv")
+df_r = pd.read_csv("/home/nate/NextCloud/Roam/Classes/Intro_to_ML/assignmnets/week_14/Ratings.csv")
+df_u = pd.read_csv("/home/nate/NextCloud/Roam/Classes/Intro_to_ML/assignmnets/week_14/Users.csv")
+
+print(df_b.head(5))
+print(df_r.head(5))
+print(df_u.head(5))
+
+#+end_src
+
+#+RESULTS:
+#+begin_example
+{'text/html': '        <script type="text/javascript">\n        window.PlotlyConfig = {MathJaxConfig: \'local\'};\n        if (window.MathJax && window.MathJax.Hub && window.MathJax.Hub.Config) {window.MathJax.Hub.Config({SVG: {font: "STIX-Web"}});}\n        </script>\n        <script type="module">import "https://cdn.plot.ly/plotly-3.3.0.min"</script>\n        '}
+         ISBN  ...                                        Image-URL-L
+0  0195153448  ...  http://images.amazon.com/images/P/0195153448.0...
+1  0002005018  ...  http://images.amazon.com/images/P/0002005018.0...
+2  0060973129  ...  http://images.amazon.com/images/P/0060973129.0...
+3  0374157065  ...  http://images.amazon.com/images/P/0374157065.0...
+4  0393045218  ...  http://images.amazon.com/images/P/0393045218.0...
+
+[5 rows x 8 columns]
+   User-ID        ISBN  Book-Rating
+0   276725  034545104X            0
+1   276726  0155061224            5
+2   276727  0446520802            0
+3   276729  052165615X            3
+4   276729  0521795028            6
+   User-ID                            Location   Age
+0        1                  nyc, new york, usa   NaN
+1        2           stockton, california, usa  18.0
+2        3     moscow, yukon territory, russia   NaN
+3        4           porto, v.n.gaia, portugal  17.0
+4        5  farnborough, hants, united kingdom   NaN
+#+end_example
+
+Much is what I would expect out of such datasets, but I do notice that all three share the ISBN number for such books to be recommended to others.
+
+** As within the guiding notebook, it's a good idea to get a better idea of the kind of users I'm working with.
+Such a attribute of a user which I have at hand to tell me more about them is their age, as that tends to get us around where interest might lay. To see this visually I can display the age range as a distributation.
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14 
+df_u = pd.read_csv("/home/nate/NextCloud/Roam/Classes/Intro_to_ML/assignmnets/week_14/Users.csv")
+
+def plot_distribution(age, df_u):
+    sns.displot(x=feature, data=data, kde=True, color='#244747');
+    plt.figtext(0.2, 1, '%s Distribution'%feature, fontfamily='serif', fontsize=17, fontweight='bold');
+#+end_src
+
+#+RESULTS:
+[[file:age_distro.svg]]
+
+Looking at the template from the notebook, I can see that there is the feature to be graphed from it's source of data which is then repeated in the sns.displot. This should mean the the feature--> age which is from the data-->df_u in this case.  I only pass this to the plot_distribution function call as this acts as a wrapper for seaborn and thus passes such arguments to it's function call as well.
+
+Looking over the distribution, I find that the mass of the users age range is from twenty to forty years of age with strangly a long tail towards ages reaching that beyond humans can live, so this is something to clean latter (via dropping); generally too, there are some missing values for the ages, which I'm unsure as yet if I'd like to drop though as well when such user's rows provide other data as well then just age.
+
+With that in mind, what sort of books are on our plateform by age as well? Such an insight could help to understand what age demographic might like which due to it's publication year (most of us do have books we remember we'd like to read from years ago).
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14 
+df_b = pd.read_csv("/home/nate/NextCloud/Roam/Classes/Intro_to_ML/assignmnets/week_14/Books.csv")
+
+def plot_distribution(Year-Of-Publication, df_b):
+    sns.displot(x=feature, data=data, kde=True, color='#244747');
+    plt.figtext(0.2, 1, '%s Distribution'%feature, fontfamily='serif', fontsize=17, fontweight='bold');
+#+end_src
+
+#+RESULTS:
+[[file:age_distro.svg]]
+
+
+*Need to return here to note what I see*
+
+* Recommedtion Models
+** Demographic Filtering recomendation model.
+First, what is such a filtering style? As it's name might give off, this is filtering of content based off a user's demogrpahics, so things like age which I've shown, gender, and so on. It can seem like this is supposed to be THE recommedation model, but this isn't the case; rather this is to collect statstics within the data for the creation of another recommedation model which will be Collaborative based: I'll talk more about that later.
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14 
+data = df_r.groupby('ISBN').agg(['mean', 'count'])['Book-Rating'].reset_index()
+
+# generating a score based off the mean rating and total number of times the book is rated
+m = data['count'].quantile(0.99)
+data = data[data['count']>m]
+print('m =', m)
+print(data.shape)
+
+R = data['mean'] # average for the book, so (mean) = (rating)
+V = data['count'] # number of votes for the book = (votes)
+C = data['mean'].mean() # mean vote across all books
+data['weighted rating'] = (v/v+m))*R + (m/v+m))*C
+data = data.sort_values('weighted rating', ascending=False).reset_index(drop=True)
+
+data = pd.merge(data, df_u, on='ISBN')[['Book Title', 'Book Author', 'mean', 'count', 'weight rating', 'Year of Publication']].drop_duplicates('Book Title').iloc[:20]
+
+data
+#+end_src
+
+So what had I'd done here? In the beginning it was assiging the object 'data' to the rating dataframe where the dataframe's columb of ISBN ID's of books is aggerated by the mean and count of book ratings, where the index is reset (?). After this the count column belonging now to the 'data' object is passed to the quantile function which is specified to 0.99, meaning such a minium vote is required to be within the top 250 of books (?). The Data object is then re-assigned as any point having a counter greater then the spcified quantile, where such a value for a point is printed to be equal to that qquatile value and then it's the shape of object Data is printed.
+
+After this, the mean, count, and mean vote of the data object is assigend to their respective variables, where such variables/values are used to calculate the weighted rating for the books; and thereafter the index of the object is reset along with a sorted value function passed the weight ratings. After this the data object is merged with itself, the user database, with it 'on' the ISBN IDs of the books, with it futher creatin columns for the titles, count, etc and dropping duplicates of book titles.
+
+Before going into what's given after all of this (which can be seen to be just some value) it's better to futher understand what's really going on here. The final result created as writen is a merging of recently re-declared object 'data' which is now a weighted value list of book ratings based off serveral statistics (mean for book votes, number of voters for a book, and mean vote acorss all the books); this is to say futher that such a object now is such a list along with the columns of Book title, year of publicstion, and so on. What this seems to have created then is a dataframe containg such books & their statsitcs with that of user profiles and their own votes contribuating to the weighted list.  
+
+*** With twenty highest rated books gotten & into a dataframe, I know have to do the same but for authors.
+The process for this is somewhat similer for how I gotten the top highest rated books.
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14 
+# Droping any dups of authors for cleanliness
+df_b.drop_duplicates('Authors')
+
+data_A = df_b['Book-Title', 'Book-Author']
+
+
+# generating a score based off the mean rating and total number of times the book is rated
+m = data_A['count'].quantile(0.99)
+data_A = data_A[data_A['count']>m]
+print('m =', m)
+print(data_A.shape)
+
+R = data_A['mean'] # average for the book, so (mean) = (rating)
+V = data_A['count'] # number of votes for the book = (votes)
+C = data_A['mean'].mean() # mean vote across all books
+
+data_A['weighted rating'] = (v/v+m))*R + (m/v+m))*C
+data_A = data.sort_values('weighted rating', ascending=False).reset_index(drop=True)
+#+end_src
+
+- I'm having some trouble understanding how to 'get book-author and title from df3'.
+  Looking into it, I find there a a couple of different ways of doing it depending on the type of thing which you wish to grab. I just want two columns, so this would be the use of single brackets adjacnet to the dataframe; this is a subset of the dataframe, so it would have to be a new object.  
+- Not sure if I need to do anything regarding the index of the dataframes, so I've left them out for now.
+
+With weighted rating of the authors (from the subset of hte df_b frame ) I have to create a user book rating matrix; this would mean creating a matrix array containing the user book ratings points/values. After this I would be then getting a similer matrix but with the user-ids for those who have read more then fifty books, which means I'm believing in some sort of ethos of their votes or maybe I know who to overlook when targetting different sorts of users.
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14
+from scipy.spare import csr.matrix
+
+df_u_matrix = df_u.pivot_table(
+    index = 'User-ID',
+    columns = 'ISBN',
+    values = 'Book-Rating'  
+)
+
+df_u_MV = df_u_matrix.values
+
+spare_df_u_MV = csr_matrix(df_u_MV)
+#+end_src
+
+I chose to use scipy to create a sparse version of the matrix for compuational speed (and why not).
+** Collaborative Fitlering.
+Collaborative filtering is a recomendation model which uses users data (their dislikes, interest, etc) to recomened things to other users with similer taste.
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14 
+
+# creating concatedly, merged dataframe and dropping any empty moives.
+df1_df3 = pd.concat(df1, df3)
+df1_df3 = df1_df3.dropna() 
+
+# getting the count of repeating books within the above datafame, turning it into it's own.
+counts = df1_df3['Book Title'].value_counts() 
+counts_df = counts.reset_index()
+counts_df.columns = ['Book Title', 'count']
+
+df1_df3 = df1_df3.merge(counts_df, on='Book Title', how='left') 
+
+isbn = df1_df3.drop_duplicates('ISBN').sort_values('count', ascending=False).iloc[:100]['ISBN']
+
+# Another filter process but this time for ISBN IDs
+df1_df3 = df1_df3[df1_df3['ISBN'].isin(isbn).reset_index(drop=True)
+
+
+# creating the sparse user rating matrix
+df_u_matrix = df_u.pivot_table(
+    index = 'User-ID',
+    columns = 'ISBN',
+    values = 'Book-Rating'  
+)
+
+df_u_MV = df_u_matrix.values
+
+spare_df_u_MV = csr_matrix(df_u_MV)
+
+# Getting use ID for those who have read more then fifty books
+rating_counts = spare_df_u_MV.getnnz(axis=1)
+min_ratings = 50
+user_mask = rating_counts >= min_ratings
+sparse_df_u_filtered = sparse_df_u_MV[user_mask, :] 
+#+end_src
+
+#+RESULTS:
+
+
+- Type of df5 for df3 which is wanting to get book titles not movie titles. 
+- Want to use df1 to get users id, isbn, and book rarint with it's merging of df3 to connect it to ratings: so df_b and df_u
+- Looking into the sort of 'mergning' process I should use in Pandas, I find that the one I'd want here is, well, Merging.
+  Ultimately the two dataset together share a kind of logical relation to each other by df1 having the users with their ratings and df3 has the book titles for such ratings. Such a combining method will connect any features that share a common key: actually, it's the case that there the ording of such common terms might not be needed, but what is needed are some matching columns to combine into one; such a process is pandas' concat() method. 
+- I'm not sure why there is a want to get the total amount of occurences per book.
+  Looking at the two dataframes, it would seem this would be to spot any repeating entries of the same book that could boost it's recomendation; futher in the notebook nothing is dropped so I could expect not to see any repeating titles. 
+  I've found I can do such a process using pandas, spceifically with juxaposing the column with it's dataframe where the method "value_counts()" is passed such a column to get another dataframe which has as it's index the book titles with it's corresponding value for it's count within the piror dataframe. 
+- Getting the top 100 books by virtue of their count seems to imply there is a 'count' column within the merged dataset I've created, but that doesn't match the solo creation of the dataframe counts.
+  So something seems to gone amiss here. It could be that the 'counts' dataframe should be merged with df1_df3, or possibly the 'counts' dataframe is in some sense consulted when sorting the books by ISBN where any duplicates are dropped based off this filter process.
+
+  How this is supposed to look and process is dependent on what's desired. From what the is writen for the 'isbn' dataframe declaration it seems there should exist a 'count' column which is sorted. So to put it together, it seems I to have a dataframed called 'isbn' which includes the ISBN of books and their counts of occurences; so perhaps it would just be the creatinon of such a dataframe 'isbn' which would then be merged into df1_df3 ( I think.. ) 
+
+  So how I fixed this was to create a series of the counts of book titles in the orginal megred dataframe where such a series is the converted into it's own dataframe and added the columns or Book Title and count. After this I had merged to the left of Book Titles in the orginally merged dataset in it, which means the dataframe df1_df3 (the oringal) has such a column now. 
+
+- In wanting to get the use IDs for those who have read more then fifty books, I have to wonder how such a thing would be done.
+  Users are likely to have rated more then a single book which would show up in the ratings columns, but this would also implie that some books by the ISBN would have more ratinsg then others form the same group of users (really clustering could be used here). This would mean I would have to filter the created matrix (and possinly turn it into a dataframe) for users which has fifty or more provided entries in the Book-Ratings column. Generally there is soem confusion on how this is all supposed to work due to me not fully understanding how such things are connected together, like that of users & their ratings to such books.   
+
+  I've found that I don't have to convert the sparse matrix to a dataframe in order to do this, but this does then require me to first find the amount of ratings, create a boolean mask where the count is 50 or more, and then use that mask to find the revlevent users (rows) form the matrix.
+  
+- The ISBN filtering object assigment is another process which isn't very clear.
+  It seems it's filtering the merged dataset by values being with the rows belonging to the ISBN column which means the dataframe will decrease due to dropping any empty rows in such a column.
+  
+** Using the Surp!se Library
+Such a library is often used to build recomendation models when dealing with explicit rating data like that is had in df1/df_u.
+
+#+begin_src python :results graphics file output :file age_distro.svg :session week-14 
+from surprise import Reader, Dataset, SVD
+from surprise.model_selection import train_test_split, cross_validate
+
+reader = Reader(rating_scale=(0,10))
+surprise_data = Dataset.load_from_df(data[['User-ID', 'ISBN', 'Book-Rating']], reader) trainset, testset = train_test_split(surprise_data, test_size=0.25)
+
+benchmark = []
+for algorithm in [SVD()]:
+    results = cross_validation(algorithm, surprise_data, measure=['RMSE'], cv=3, verbose=False)
+
+    tmp = pd.DataFrame.from_dict(results).mean(axis=0)
+    tmp = tmp.append(pd.Series([str(algorithm).split('')[0].split('.')[-1]], index=['Algorithm']))
+
+pd.DataFrame(benchmark).set_index('Algorithm').sort_values('test_rmse')
+
+svd = SVD()
+svd.fit(trainset)
+
+index_val = 2131
+userId = df.index[index_val]
+books = []
+ratings = []
+titles = []
+
+for isbn in df.iloc[index_val][df.iloc[index_val].isna()].index:
+    books.append(isbn)
+    title = data[data['ISBN']==isbn]['Book-Title'].values[0]
+    titles.append(title)
+    ratings.append(svd.predict(userId, isbn).est)
+
+prediction = pd.DataFrame({'ISBN':books, 'title':titles, 'ratings':ratings, 'userId':userId})
+prediction = prediction.sort_values('rating', ascending=False).iloc[:10].reset_index(drop=True)
+
+temp = data[data['User-ID']==df.index[index_val]].sort_values(
+    'Book-Rating', ascending=False)[['Book-Rating', 'Book-Title', 'User-ID']].iloc[:10].reset_index(drop=True)
+prediction['Book Read']=temp
+#+end_src
+
+
+
